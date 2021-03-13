@@ -4,15 +4,25 @@ Assignment 2 from the course LT2222 in the University of Gothenburg's winter 202
 
 Your name: Sigrid Jonsson
 
-*Answer all questions in the notebook here.  You should also write whatever high-level documentation you feel you need to here.*
+
+## Preprocessing
+
+In the preprocessing step, the words are lemmatized and lowercased. I decided to remove punctuation; since the sentence numbers are included in the data, the punctuation isn't needed to be able to differentiate the sentences. It also makes the creation of instances in the next step easier.
+I also decided to remove the non first words of the named entities, that is the I-tags. These are not to be included as features, and the B-tags already contains the information of the type, the I-tags are made redundant. To remove these also makes the next step easier, since the case of several NEs in a row no longer needs to be taken in to account.
 
 
-1. To preprocess the text (lowercase and lemmatize; punctuation can be preserved as it gets its own rows).
+## NE class instances
 
-2. To create instances from every from every identified named entity in the text with the type of the NE as the class, and a surrounding context of five words on either side as the features.
+* Include other named entities as features.
 
-3. To generate vectors and split the instances into training and testing datasets at random.
 
-4. To train a support vector machine (via sklearn.svm.LinearSVC) for classifying the NERs.
+## Data table
 
-5. To evaluate the performance of the classifier.
+* Pick the top frequent words to include in the table
+* Reduces the table using sklearn
+
+
+## Confusion matrix
+
+* Number of NE types are not evenly distributed: more than half of the data is geo.
+* Training and testing data seems to roughly correspond to each other; kind of the same distribution of true positives, true negatives, false positives, and false negatives.

@@ -7,43 +7,59 @@ import random
 import re
 import nltk
 from nltk.stem import WordNetLemmatizer
-from nltk.corpus import wordnet 
+from nltk.corpus import wordnet
+from sklearn.decomposition import TruncatedSVD
+from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
 
 lemmatizer = WordNetLemmatizer()
+CLASS = 'class_label'
 
-# Module file with functions that you fill in so that they can be
-# called by the notebook.  This file should be in the same
-# directory/folder as the notebook when you test with the notebook.
 
-# You can modify anything here, add "helper" functions, more imports,
-# and so on, as long as the notebook runs and produces a meaningful
-# result (though not necessarily a good classifier).  Document your
-# code with reasonable comments.
+def get_lemma(word, pos_tag):
+    """Get the lemma of the word based on its POS tag
 
-def get_lemma(word, tag):
-    if tag.startswith('J'): 
-        simple_tag =  wordnet.ADJ 
-    elif tag.startswith('V'): 
-        simple_tag =  wordnet.VERB 
-    elif tag.startswith('N'): 
-        simple_tag =  wordnet.NOUN 
-    elif tag.startswith('R'): 
-        simple_tag = wordnet.ADV 
+    Args:
+        word (str): The word to lemmatize
+        pos_tag (str): POS tag of the word to lemmatize
+
+    Returns:
+        str: Lemmatized word
+    """
+    if pos_tag.startswith('J'):
+        simple_tag = wordnet.ADJ
+    elif pos_tag.startswith('V'):
+        simple_tag = wordnet.VERB
+    elif pos_tag.startswith('N'):
+        simple_tag = wordnet.NOUN
+    elif pos_tag.startswith('R'):
+        simple_tag = wordnet.ADV
     else:
         return word
 
     return lemmatizer.lemmatize(word, simple_tag)
 
-# Function for Part 1
-# 1. To preprocess the text (lowercase and lemmatize; punctuation can be preserved as it gets its own rows).
+
 def preprocess(inputfile):
+    """Do some preprocessing of the data from inputfile
+
+    * Split the data in the inputfile to list
+    * lemmatize words
+    * Removes punctuations
+    * Removes I-xyz; since they are not to be included as feature, they aren't necessary when creating instances
+
+    Args:
+        inputfile (file): An open file handle
+
+    Returns:
+        pandas.DataFrame: The preprocessed data from inputfile
+    """
     header_text = inputfile.readline().strip()
-    header_list = re.split("[\t]", header_text)
+    header_list = re.split('[\t]', header_text)
     data_text = inputfile.readlines()
     data_list = []
     for line in data_text:
         dl = line.split()
-        if not dl[2].isalnum():
+        if not dl[2].isalnum() or dl[4].startswith('I'):
             continue
         lemma = get_lemma(dl[2], dl[3]).lower()
         dl[2] = lemma
@@ -53,19 +69,6 @@ def preprocess(inputfile):
     return df
 
 
-def preprocess_old(inputfile):
-    in_data = inputfile.readlines()
-    out_data = []
-
-    for line in in_data:
-        data_list = line.split()
-        lemma = get_lemma(data_list[2], data_list[3]).lower()
-        data_list[2] = lemma
-        out_data.append(data_list)
-    return out_data
-
-# Code for part 2
-# 2. To create instances from every identified named entity in the text with the type of the NE as the class, and a surrounding context of five words on either side as the features.
 class Instance:
     def __init__(self, neclass, features):
         self.neclass = neclass
@@ -77,96 +80,153 @@ class Instance:
     def __repr__(self):
         return str(self)
 
+
 def create_instances(data):
-    start_tags = ["<S5>", "<S4>", "<S3>", "<S2>", "<S1>"]
-    end_tags = ["<E5>", "<E4>", "<E3>", "<E2>", "<E1>"]
+    """Get instances of NE classes with corresponding list of features
+
+    * Get all NE rows from data
+    * For each NE index in NE rows, get the 10 rows from data surronding the NE index
+    * Remove the rows that is not in the same sentence as the current NE
+    * Of the rows that are left, att the words to feature list
+    * For the rows that was removed, add start tags and end to the feature list
+    * Create instance of NE class and feature list
+
+
+    Args:
+        data (pandas.DataFrame): Assumes the format as is returned from preprocess 
+
+    Returns:
+        list: A list of instances
+    """
+    start_tags = ['<S1>', '<S2>', '<S3>', '<S4>', '<S5>']
+    end_tags = ['<E5>', '<E4>', '<E3>', '<E2>', '<E1>']
+    feat_count = 5
     instances = []
-    #for idx, val in enumerate(data):
-    #    if 
-    return None
+    ne_rows = data.loc[data['Tag'].str.startswith('B')]
+    for i, row in ne_rows.iterrows():
+        feat_rows = data.iloc[(i-feat_count):(i+1+feat_count)]
+        feat_rows_culled = feat_rows.loc[feat_rows['Sentence #']
+                                         == row['Sentence #']]
+        row_count = len(feat_rows_culled.index)
 
-def create_instances_old(data):
-    start_tags = ["<S5>", "<S4>", "<S3>", "<S2>", "<S1>"]
-    end_tags = ["<E5>", "<E4>", "<E3>", "<E2>", "<E1>"]
-    punct_list = [".", "?", "!", ";", ":"]
-    instances = []
-    for idx, val in enumerate(data):
-        if val[4].startswith("I"):
-            continue
-        elif val[4].startswith("B"):
-            start_id = idx - 1
-            end_id = idx + 1
-            for someotheridx in range(1,6):
-                thisotheridx = idx + someotheridx
-                if not data[thisotheridx][4].startswith("I"):
-                    end_id = thisotheridx
-                    break
-            neclass = val[4][2:]
-            pre_features = []
-            post_features = []
-            start_reached = False
-            stop_reached = False
-            s_tag_idx = 0
-            e_tag_idx = 0
-            for i in range(0,5):
-                if start_reached:
-                    pre_features.insert(0, start_tags[s_tag_idx])
-                    s_tag_idx += 1
-                else:
-                    pre_feat = data[start_id-i]
-                    if pre_feat[2] in punct_list:
-                        start_reached = True
-                        pre_features.insert(0, start_tags[s_tag_idx])
-                        s_tag_idx += 1
-                    else:
-                        pre_features.insert(0, pre_feat[2])
+        ne_pos = feat_rows_culled.index.get_loc(row.name)
+        feat_list = feat_rows_culled['Word'].tolist()
+        feat_list = feat_list[:ne_pos] + feat_list[(ne_pos + 1):]
+        start_tag_count = ne_pos
+        end_tag_count = feat_count + ne_pos + 1 - row_count
 
-                if stop_reached:
-                    post_features.append(end_tags[e_tag_idx])
-                    e_tag_idx += 1
-                else:
-                    post_feat = data[end_id+i]
-                    if post_feat[2] in punct_list:
-                        stop_reached = True
-                        post_features.append(end_tags[e_tag_idx])
-                        e_tag_idx += 1
-                    else:
-                        post_features.append(post_feat[2])
-
-            features = pre_features + post_features
-            instances.append(Instance(neclass, features))
+        features = start_tags[start_tag_count:] + \
+            feat_list + end_tags[:end_tag_count]
+        neclass = row['Tag'][2:]
+        instances.append(Instance(neclass, features))
 
     return instances
 
-# Code for part 3
-# 3. To generate vectors and split the instances into training and testing datasets at random.
-def create_table(instances):
-    df = pd.DataFrame()
-    df['class'] = [random.choice(['art','eve','geo','gpe','nat','org','per','tim']) for i in range(100)]
-    for i in range(3000):
-        df[i] = npr.random(100)
 
-    return df
+def get_topfreq_feats(df, top_freq=3000):
+    """Get dataframe containing the top frequent features
+
+    * Calculate sum of each column
+    * Create sorted dictionary of the columns 
+    * Cast to list, and slice to only keep the top frequent
+    * Copy the columns from df with the top frequent words to new dataframe
+
+    Args:
+        df (pandas.DataFrame): [description]
+        top_freq (int, optional): [description]. Defaults to 3000.
+
+    Returns:
+        pandas.DataFrame: [description]
+    """
+    column_sums = {}
+    for column in df.keys():
+        if column is CLASS:
+            continue
+        column_sums[column] = df[column].sum()
+
+    sorted_sums = dict(
+        sorted(column_sums.items(), key=lambda item: item[1], reverse=True))
+    top_freq_feats = list(sorted_sums)[:top_freq]
+    top_freq_feats.insert(0, CLASS)
+    df_topfreq_feats = df[top_freq_feats].copy()
+
+    return df_topfreq_feats
+
+
+def reduce(df, dims=300):
+    """[summary]
+
+    Args:
+        matrix (pandas.DataFrame): [description]
+        dims (int, optional): [description]. Defaults to 300.
+
+    Returns:
+        pandas.DataFrame: [description]
+    """    
+    df_copy = df.drop(columns=CLASS, inplace=False)
+    svd = TruncatedSVD(n_components=dims)
+    reduced = svd.fit_transform(df_copy)
+    df_reduced = pd.DataFrame(reduced)
+    df_reduced.insert(loc=0, column=CLASS, value=df[CLASS])
+    return df_reduced
+
+def create_table(instances):
+    """Creates table instances
+
+    * Makes list of instances to dict
+    * Create dataframe out of dict
+    * Gets the top frequent columns
+
+    Args:
+        instances (list): List of instances, generated from create_instance
+
+    Returns:
+        pandas.DataFrame: [description]
+    """
+    instance_data = []
+    for inst in instances:
+        feat_dict = {CLASS: inst.neclass}
+        for feat in inst.features:
+            if feat not in feat_dict:
+                feat_dict[feat] = 0
+            feat_dict[feat] += 1
+        instance_data.append(feat_dict)
+
+    df = pd.DataFrame.from_dict(data=instance_data).fillna(0)
+    df_topfreq = get_topfreq_feats(df)
+    df_reduced = reduce(df_topfreq)
+    return df_reduced
+
 
 def ttsplit(bigdf):
-    df_train = pd.DataFrame()
-    df_train['class'] = [random.choice(['art','eve','geo','gpe','nat','org','per','tim']) for i in range(80)]
-    for i in range(3000):
-        df_train[i] = npr.random(80)
+    """Splits a table into training and testing data
 
-    df_test = pd.DataFrame()
-    df_test['class'] = [random.choice(['art','eve','geo','gpe','nat','org','per','tim']) for i in range(20)]
-    for i in range(3000):
-        df_test[i] = npr.random(20)
-        
-    return df_train.drop('class', axis=1).to_numpy(), df_train['class'], df_test.drop('class', axis=1).to_numpy(), df_test['class']
+    Args:
+        bigdf (pandas.DataFrame): [description]
 
-# Code for part 5
-# 5. To evaluate the performance of the classifier.
+    Returns:
+        [type]: [description]
+    """
+    df_train = bigdf.sample(frac=0.80)
+    df_test = bigdf.drop(df_train.index)
+    return df_train.drop(CLASS, axis=1).to_numpy(), df_train[CLASS], df_test.drop(CLASS, axis=1).to_numpy(), df_test[CLASS]
+
+
 def confusion_matrix(truth, predictions):
-    print("I'm confusing.")
-    return "I'm confused."
+    """Creates a confusion matrix
 
-# Code for bonus part B
+    Args:
+        truth (list): [description]
+        predictions (list): [description]
+
+    Returns:
+        pandas.DataFrame: [description]
+    """
+    neclasses = list(set(truth.tolist() + predictions.tolist()))
+    con_matrix = sklearn_confusion_matrix(truth, predictions, labels=neclasses)
+    df = pd.DataFrame(data=con_matrix, index=neclasses, columns=neclasses)
+    return df
+
+
 def bonusb(filename):
     pass
