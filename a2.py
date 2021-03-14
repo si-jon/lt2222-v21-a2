@@ -23,7 +23,8 @@ def get_lemma(word, pos_tag):
         pos_tag (str): POS tag of the word to lemmatize
 
     Returns:
-        str: Lemmatized word
+        str: Lemmatized word, if it can be lemmatized. Otherwise the
+        word unchanged.
     """
     if pos_tag.startswith('J'):
         simple_tag = wordnet.ADJ
@@ -40,12 +41,15 @@ def get_lemma(word, pos_tag):
 
 
 def preprocess(inputfile):
-    """Do some preprocessing of the data from inputfile
-
-    * Split the data in the inputfile to list
-    * lemmatize words
-    * Removes punctuations
-    * Removes I-xyz; since they are not to be included as feature, they aren't necessary when creating instances
+    """Return preproccessed data from inputfile as a table
+    
+    The preprocessing steps include:
+        * Split the data from input to lists
+        * Tokenize the data of each row
+        * Lemmatize the words
+        * Remove punctuations
+        * Remove I-xyz; since they are not to be included as feature
+        they aren't necessary when creating instances
 
     Args:
         inputfile (file): An open file handle
@@ -82,41 +86,62 @@ class Instance:
 
 
 def create_instances(data):
-    """Get instances of NE classes with corresponding list of features
+    """Create instances of NE classes with corresponding list of features
 
-    * Get all NE rows from data
-    * For each NE index in NE rows, get the 10 rows from data surronding the NE index
-    * Remove the rows that is not in the same sentence as the current NE
-    * Of the rows that are left, att the words to feature list
-    * For the rows that was removed, add start tags and end to the feature list
-    * Create instance of NE class and feature list
-
+    The instance creation is done in the following steps:
+        * Get all NE rows from data
+        * For each NE in NE rows
+            * Get all rows that are in the same sentence as NE
+            * Of those rows, remove potential foregin NEs
+            * From the remaining rows, get the rows surrounding NE,
+            five before/after
+            * Create list of words from the rows as features
+            * If there is less than five word features of before/after, 
+            sentence start/end, add corresponding start/end tags
+            * Create instance of NE class and feature list
 
     Args:
-        data (pandas.DataFrame): Assumes the format as is returned from preprocess 
+        data (pandas.DataFrame): Table of data, where each row contains
+                                information of each word and potential NEs 
 
     Returns:
-        list: A list of instances
+        list: A list of instances of NE classes and features
     """
     start_tags = ['<S1>', '<S2>', '<S3>', '<S4>', '<S5>']
     end_tags = ['<E5>', '<E4>', '<E3>', '<E2>', '<E1>']
     feat_count = 5
     instances = []
+    # Get all rows containing NEs
     ne_rows = data.loc[data['Tag'].str.startswith('B')]
     for i, row in ne_rows.iterrows():
-        feat_rows = data.iloc[(i-feat_count):(i+1+feat_count)]
-        feat_rows_culled = feat_rows.loc[feat_rows['Sentence #']
-                                         == row['Sentence #']]
-        row_count = len(feat_rows_culled.index)
+        # Get all rows included in the sentence
+        sentence = data.loc[data['Sentence #'] == row['Sentence #']]
 
-        ne_pos = feat_rows_culled.index.get_loc(row.name)
-        feat_list = feat_rows_culled['Word'].tolist()
+        # Remove all the other NEs from the sentence
+        sentence_nes = sentence.loc[(sentence['Tag'].str.startswith('B')) & (
+            sentence.index != row.name)]
+        sentence_culled = sentence.drop(sentence_nes.index, axis='index')
+
+        # Get the surrounding feature rows, five before and after the NE
+        ne_pos = sentence_culled.index.get_loc(row.name)
+        start = max(ne_pos-feat_count, 0)
+        end = ne_pos+1+feat_count
+        feat_rows = sentence_culled.iloc[start:end]
+
+        # Create list of features out of feature rows
+        ne_pos = feat_rows.index.get_loc(row.name)
+        row_count = len(feat_rows.index)
+        feat_list = feat_rows['Word'].tolist()
         feat_list = feat_list[:ne_pos] + feat_list[(ne_pos + 1):]
+        
+        # If there are features missing (end/start of sentence), 
+        # prepend and append start/end tags
         start_tag_count = ne_pos
         end_tag_count = feat_count + ne_pos + 1 - row_count
-
         features = start_tags[start_tag_count:] + \
             feat_list + end_tags[:end_tag_count]
+            
+        # Create instance
         neclass = row['Tag'][2:]
         instances.append(Instance(neclass, features))
 
@@ -126,17 +151,17 @@ def create_instances(data):
 def get_topfreq_feats(df, top_freq=3000):
     """Get dataframe containing the top frequent features
 
-    * Calculate sum of each column
-    * Create sorted dictionary of the columns 
-    * Cast to list, and slice to only keep the top frequent
-    * Copy the columns from df with the top frequent words to new dataframe
+    Sorts the columns of the incoming dataframe df by the sum of the values
+    of each column. From this sorted dataframe, return slice it to keep
+    the top frequent columns.
 
     Args:
-        df (pandas.DataFrame): [description]
-        top_freq (int, optional): [description]. Defaults to 3000.
+        df (pandas.DataFrame): Table to get the top frequent feats from
+        top_freq (int, optional): The amount of columns to return. 
+                                  Defaults to 3000.
 
     Returns:
-        pandas.DataFrame: [description]
+        pandas.DataFrame: Table only including the top frequent columns.
     """
     column_sums = {}
     for column in df.keys():
@@ -154,15 +179,15 @@ def get_topfreq_feats(df, top_freq=3000):
 
 
 def reduce(df, dims=300):
-    """[summary]
+    """Dimensionality reduction of table
 
     Args:
-        matrix (pandas.DataFrame): [description]
-        dims (int, optional): [description]. Defaults to 300.
+        df (pandas.DataFrame): Table to reduce
+        dims (int, optional): Dimension of the reduced table. Defaults to 300.
 
     Returns:
-        pandas.DataFrame: [description]
-    """    
+        pandas.DataFrame: A reduced table
+    """
     df_copy = df.drop(columns=CLASS, inplace=False)
     svd = TruncatedSVD(n_components=dims)
     reduced = svd.fit_transform(df_copy)
@@ -170,18 +195,19 @@ def reduce(df, dims=300):
     df_reduced.insert(loc=0, column=CLASS, value=df[CLASS])
     return df_reduced
 
+
 def create_table(instances):
     """Creates table instances
 
-    * Makes list of instances to dict
-    * Create dataframe out of dict
-    * Gets the top frequent columns
+    Creates humongous table out of NE classes and features from instances.
+    The table columns are the different features, and each row contains
+    the number of each feature the corresponding NE class have.
 
     Args:
         instances (list): List of instances, generated from create_instance
 
     Returns:
-        pandas.DataFrame: [description]
+        pandas.DataFrame: A reduced table of the ne classes and their features
     """
     instance_data = []
     for inst in instances:
@@ -202,10 +228,12 @@ def ttsplit(bigdf):
     """Splits a table into training and testing data
 
     Args:
-        bigdf (pandas.DataFrame): [description]
+        bigdf (pandas.DataFrame): Table to be split
 
     Returns:
-        [type]: [description]
+        Tuple: A tuple of four containing a table of training data, a list
+        of NE classes corresponding to the training data, a table of testing data,
+        and a list of NE classes corresponding to the testing data
     """
     df_train = bigdf.sample(frac=0.80)
     df_test = bigdf.drop(df_train.index)
@@ -216,11 +244,11 @@ def confusion_matrix(truth, predictions):
     """Creates a confusion matrix
 
     Args:
-        truth (list): [description]
-        predictions (list): [description]
+        truth (list): The actual NE classes
+        predictions (list): The predicted NE classes
 
     Returns:
-        pandas.DataFrame: [description]
+        pandas.DataFrame: A confusion matrix
     """
     neclasses = list(set(truth.tolist() + predictions.tolist()))
     con_matrix = sklearn_confusion_matrix(truth, predictions, labels=neclasses)
