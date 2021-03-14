@@ -2,7 +2,7 @@
 
 Assignment 2 from the course LT2222 in the University of Gothenburg's winter 2021 semester.
 
-Your name: Sigrid Jonsson
+By Sigrid Jonsson
 
 
 ## Preprocessing
